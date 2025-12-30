@@ -34,7 +34,7 @@ export class McpToolServer {
       headers["x-api-key"] = apiKey;
     }
 
-    console.log(`MCP Tool Calling: ${method} ${url}`);
+    console.log(`MCP Tool Calling: ${method} ${url} ${apiKey} ${JSON.stringify(options.payload)}`);
 
     try {
       const response = await fetch(url, {
@@ -64,41 +64,61 @@ export class McpToolServer {
     );
 
     (this.server as any).tool(
-      "get_oap_detail",
-      "Get OAP details",
-      { queryParams: z.record(z.any()).optional() },
-      async ({ queryParams }: { queryParams?: any }) => {
-        const result = await this.callOapApi("oap", "GET", { params: queryParams });
+      "get_oap_details",
+      "Get OAP configuration details",
+      {
+        name: z.string().describe("Name of the OAP"),
+        mode: z.string().describe("Mode (e.g., 'STUDENT', 'AGENT')"),
+        language: z.string().describe("Language code (e.g., 'en')")
+      },
+      async ({ name, mode, language }: { name: string, mode: string, language: string }) => {
+        const result = await this.callOapApi("oap", "GET", { params: { name: name.toUpperCase(), mode: mode.toUpperCase(), language } });
         return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
       }
     );
 
     (this.server as any).tool(
-      "get_oap_form",
-      "Get OAP forms",
-      { queryParams: z.record(z.any()).optional() },
-      async ({ queryParams }: { queryParams?: any }) => {
-        const result = await this.callOapApi("oap/forms", "GET", { params: queryParams });
+      "get_oap_form_details",
+      "Get specific form details for an OAP",
+      {
+        oap: z.string().describe("OAP Name"),
+        mode: z.string().describe("Mode"),
+        form: z.string().describe("Form Name"),
+        language: z.string().describe("Language code")
+      },
+      async ({ oap, mode, form, language }: { oap: string, mode: string, form: string, language: string }) => {
+        const result = await this.callOapApi("oap/forms", "GET", { params: { oap, mode, form, language } });
         return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
       }
     );
 
     (this.server as any).tool(
-      "get_oap_form_sections",
-      "Get OAP form sections",
-      { queryParams: z.record(z.any()).optional() },
-      async ({ queryParams }: { queryParams?: any }) => {
-        const result = await this.callOapApi("oap/form/sections", "GET", { params: queryParams });
+      "get_oap_section_details",
+      "Get specific section details for a form",
+      {
+        oap: z.string().describe("OAP Name"),
+        mode: z.string().describe("Mode"),
+        formName: z.string().describe("Form Name"),
+        sectionName: z.string().describe("Section Name"),
+        language: z.string().describe("Language code")
+      },
+      async ({ oap, mode, formName, sectionName, language }: { oap: string, mode: string, formName: string, sectionName: string, language: string }) => {
+        const result = await this.callOapApi("oap/form/sections", "GET", { params: { oap, mode, formName, sectionName, language } });
         return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
       }
     );
 
     (this.server as any).tool(
-      "get_student_details_by_id",
-      "Get student details by ID",
-      { queryParams: z.record(z.any()).optional() },
-      async ({ queryParams }: { queryParams?: any }) => {
-        const result = await this.callOapApi("oap/getstudentdetailsbyid", "GET", { params: queryParams });
+      "get_section_config",
+      "Get list of sections for a form",
+      {
+        oapName: z.string().describe("OAP Name"),
+        formName: z.string().describe("Form Name"),
+        mode: z.string().describe("Mode"),
+        language: z.string().describe("Language code")
+      },
+      async ({ oapName, formName, mode, language }: { oapName: string, formName: string, mode: string, language: string }) => {
+        const result = await this.callOapApi("oap/sections", "GET", { params: { oapName, formName, mode, language } });
         return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
       }
     );
@@ -106,7 +126,11 @@ export class McpToolServer {
     (this.server as any).tool(
       "get_student_details",
       "Get student details",
-      { oapName: z.string(), email: z.string(), applicationId: z.string() },
+      {
+        oapName: z.string().describe("OAP Name"),
+        email: z.string().describe("Student Email"),
+        applicationId: z.string().describe("Application ID")
+      },
       async ({ oapName, email, applicationId }: { oapName: string, email: string, applicationId: string }) => {
         const result = await this.callOapApi("oap/getstudentdetails", "GET", {
           params: { oapName, email, applicationId }
@@ -117,61 +141,40 @@ export class McpToolServer {
 
     (this.server as any).tool(
       "save_student_details",
-      "Save student details",
-      { payload: z.any(), queryParams: z.record(z.any()).optional() },
-      async ({ payload, queryParams }: { payload: any, queryParams?: any }) => {
-        const result = await this.callOapApi("oap/savestudentdetails", "POST", { payload, params: queryParams });
-        return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
-      }
-    );
+      "Save student details and automatically fetch next form config",
+      {
+        oapName: z.string().describe("OAP Name"),
+        mode: z.string().describe("Mode currently used"),
+        oapDetail: z.any().describe("OAP Detail Object")
+      },
+      async ({ oapName, mode, oapDetail }: { oapName: string, mode: string, oapDetail: any }) => {
+        // 1. Save Student Details
+        const saveResult = await this.callOapApi("oap/savestudentdetails", "POST", {
+          payload: oapDetail,
+          params: { oapName, mode }
+        });
 
-    (this.server as any).tool(
-      "get_presigned_url",
-      "Get presigned URL for document upload",
-      { payload: z.any() },
-      async ({ payload }: { payload: any }) => {
-        const result = await this.callOapApi("oap/uploadstudentdocument/getsignedurl", "POST", { payload });
-        return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
-      }
-    );
+        // 2. Chained Fetch: Get Next Form Configuration (APPLICATION form)
+        // This eliminates the need for the frontend/AI to guess and make another call
+        const nextFormConfig = await this.callOapApi("oap/forms", "GET", {
+          params: {
+            oap: oapName.toUpperCase(),
+            form: "APPLICATION",
+            mode: mode.toUpperCase(),
+            language: "en" // Defaulting to en for now, or could pass from args if added
+          }
+        });
 
-    (this.server as any).tool(
-      "get_document_name",
-      "Get document name",
-      { queryParams: z.record(z.any()).optional() },
-      async ({ queryParams }: { queryParams?: any }) => {
-        const result = await this.callOapApi("oap/getstudentdocument", "GET", { params: queryParams });
-        return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
-      }
-    );
-
-    (this.server as any).tool(
-      "delete_document",
-      "Delete document",
-      { queryParams: z.record(z.any()).optional() },
-      async ({ queryParams }: { queryParams?: any }) => {
-        const result = await this.callOapApi("oap/deletestudentdocument", "DELETE", { params: queryParams });
-        return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
-      }
-    );
-
-    (this.server as any).tool(
-      "get_updated_doc",
-      "Get updated document",
-      { payload: z.any() },
-      async ({ payload }: { payload: any }) => {
-        const result = await this.callOapApi("oap/uploadstudentdocument", "POST", { payload });
-        return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
-      }
-    );
-
-    (this.server as any).tool(
-      "get_all_section_forms",
-      "Get all section forms",
-      { queryParams: z.record(z.any()).optional() },
-      async ({ queryParams }: { queryParams?: any }) => {
-        const result = await this.callOapApi("oap/sections", "GET", { params: queryParams });
-        return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+        // Return composite result
+        return {
+          content: [{
+            type: "text",
+            text: JSON.stringify({
+              saveResult,
+              nextFormConfig
+            }, null, 2)
+          }]
+        };
       }
     );
 
@@ -248,6 +251,92 @@ export class McpToolServer {
         } catch (e) {
           return { content: [{ type: "text", text: `Error: ${e.message}` }], isError: true };
         }
+      }
+    );
+
+    (this.server as any).tool(
+      "start_new_application",
+      "Start a new application and get the first section configuration",
+      {
+        oap: z.string().describe("OAP Name (e.g., UCW)"),
+        mode: z.string().optional().describe("Mode (default: AGENT)")
+      },
+      async ({ oap, mode }: { oap: string, mode?: string }) => {
+        const defaultMode = mode || "AGENT";
+        // Hardcoded start flow: BASIC_INFO / STUDENT_INFO
+        const result = await this.callOapApi("oap/form/sections", "GET", {
+          params: {
+            oap: oap.toUpperCase(),
+            mode: defaultMode.toUpperCase(),
+            formName: "BASIC_INFO",
+            sectionName: "STUDENT_INFO",
+            language: "en"
+          }
+        });
+        return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+      }
+    );
+
+    (this.server as any).tool(
+      "get_application_form_config",
+      "Get Application Form Configuration (returns list of sections)",
+      {
+        oap: z.string().describe("OAP Name"),
+        mode: z.string().optional().describe("Mode (default: AGENT)"),
+        language: z.string().optional().describe("Language (default: en)")
+      },
+      async ({ oap, mode, language = "en" }: { oap: string, mode?: string, language?: string }) => {
+        const defaultMode = mode || "AGENT";
+
+        // 1. Get Form Details (list of sections)
+        // This returns the "Map" of the application (ordered sections)
+        const formDetails = await this.callOapApi("oap/forms", "GET", {
+          params: { oap: oap.toUpperCase(), form: "APPLICATION", mode: defaultMode.toUpperCase(), language }
+        });
+
+        // Return ONLY the form details. The frontend/AI must iterate through formDetails.section[]
+        return {
+          content: [{
+            type: "text",
+            text: JSON.stringify({ formDetails }, null, 2)
+          }]
+        };
+      }
+    );
+
+    (this.server as any).tool(
+      "save_application_progress",
+      "Save application progress (Fetch -> Merge -> Save)",
+      {
+        oapName: z.string(),
+        email: z.string(),
+        applicationId: z.string(),
+        sectionData: z.any().describe("Data to merge and save")
+      },
+      async ({ oapName, email, applicationId, sectionData }: { oapName: string, email: string, applicationId: string, sectionData: any }) => {
+        // 1. Fetch current student details
+        const currentDetails = await this.callOapApi("oap/getstudentdetails", "GET", {
+          params: { oapName, email, applicationId }
+        });
+
+        // 2. Merge new section data
+        const mergedDetails = { ...currentDetails, ...sectionData };
+
+        // 3. Save updated details
+        // Note: The save endpoint usually needs `mode`. We might need to infer it or ask for it.
+        // Based on user request "call ... /oap/getstudentdetails ... and then u need to save".
+        // We'll assume 'AGENT' if not present in currentDetails, or extract from it if possible. 
+        // However, the save ENDPOINT requires `mode` as a query param.
+        // Let's try to find mode in currentDetails or default to AGENT.
+
+        const modeToUse = (currentDetails.mode || "AGENT").toUpperCase(); // Defensive coding
+
+        const saveResult = await this.callOapApi("oap/savestudentdetails", "POST", {
+          payload: mergedDetails,
+          params: { oapName, mode: modeToUse }
+        });
+
+        return { content: [{ type: "text", text: JSON.stringify(saveResult, null, 2) }] };
       }
     );
 
