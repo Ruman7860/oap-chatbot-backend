@@ -45,10 +45,15 @@ export class McpToolServer {
       });
 
       const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(`OAP API Error (${response.status}): ${JSON.stringify(data)}`);
+      }
+
       return data;
     } catch (error) {
       console.error(`Error calling OAP API ${endpoint}:`, error);
-      throw new Error(`Failed to call OAP API: ${error.message}`);
+      throw error; // Re-throw to be caught by tool handler
     }
   }
 
@@ -306,14 +311,15 @@ export class McpToolServer {
 
     (this.server as any).tool(
       "save_application_progress",
-      "Save application progress (Fetch -> Merge -> Save)",
+      "Save application progress and fetch next section details",
       {
         oapName: z.string(),
         email: z.string(),
         applicationId: z.string(),
-        sectionData: z.any().describe("Data to merge and save")
+        sectionData: z.any().describe("Data to merge and save"),
+        currentSectionName: z.string().describe("Current section being saved (e.g., PROGRAM_SELECTION)")
       },
-      async ({ oapName, email, applicationId, sectionData }: { oapName: string, email: string, applicationId: string, sectionData: any }) => {
+      async ({ oapName, email, applicationId, sectionData, currentSectionName }: { oapName: string, email: string, applicationId: string, sectionData: any, currentSectionName: string }) => {
         // 1. Fetch current student details
         const currentDetails = await this.callOapApi("oap/getstudentdetails", "GET", {
           params: { oapName, email, applicationId }
@@ -336,7 +342,70 @@ export class McpToolServer {
           params: { oapName, mode: modeToUse }
         });
 
-        return { content: [{ type: "text", text: JSON.stringify(saveResult, null, 2) }] };
+        // 4. Smart Transition: Fetch Next Section Details
+        let nextSectionDetails = null;
+        try {
+          // A. Get the Map (Application Config)
+          const formConfig = await this.callOapApi("oap/forms", "GET", {
+            params: {
+              oap: oapName.toUpperCase(),
+              form: "APPLICATION",
+              mode: modeToUse,
+              language: "en"
+            }
+          });
+
+          console.log("formConfig -> ", JSON.stringify(formConfig, null, 2));
+
+          // B. Find Current Index
+          const sections = formConfig.section || [];
+
+          let currentIndex = sections.findIndex((s: any) => s.section === currentSectionName);
+
+          // Robust Fallback: Try case-insensitive or Display Name match
+          if (currentIndex === -1) {
+            console.log(`Exact match failed for '${currentSectionName}'. Trying fallbacks...`);
+            currentIndex = sections.findIndex((s: any) =>
+              s.section?.toUpperCase() === currentSectionName?.toUpperCase() ||
+              s.displayName?.toUpperCase() === currentSectionName?.toUpperCase()
+            );
+          }
+
+          console.log(`Section Match Result: '${currentSectionName}' -> Index ${currentIndex}`);
+
+          // C. Get Next Section
+          if (currentIndex !== -1 && currentIndex < sections.length - 1) {
+            const nextSection = sections[currentIndex + 1];
+            console.log("nextSection -> ", nextSection);
+
+            // D. Fetch Next Section Details (Questions)
+            console.log(`Auto-fetching next section: ${nextSection.section}`);
+            nextSectionDetails = await this.callOapApi("oap/form/sections", "GET", {
+              params: {
+                oap: oapName.toUpperCase(),
+                mode: modeToUse,
+                formName: "APPLICATION",
+                sectionName: nextSection.section,
+                language: "en"
+              }
+            });
+            console.log("nextSectionDetails -> ", JSON.stringify(nextSectionDetails, null, 2));
+          }
+        } catch (e) {
+          console.error("Failed to auto-fetch next section", e);
+          // Non-blocking error, user can still proceed manually
+        }
+
+        return {
+          content: [{
+            type: "text",
+            text: JSON.stringify({
+              saveResult,
+              nextSectionDetails,
+              message: nextSectionDetails ? `Saved. Proceeding to ${(nextSectionDetails as any).displayName} ...` : "Saved. No next section found."
+            }, null, 2)
+          }]
+        };
       }
     );
 
